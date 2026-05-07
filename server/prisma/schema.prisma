@@ -1,0 +1,315 @@
+// ============================================================
+// CoolCliq — Prisma Schema
+// PostgreSQL (Supabase)
+// ============================================================
+// Domain: QR-based venue presence + anonymous chat platform
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum AdminRole {
+  SUPER_ADMIN     // full platform control
+  MODERATOR       // moderation queue + user actions
+  VENUE_MANAGER   // can manage assigned venues only
+}
+
+enum PresenceStatus {
+  ACTIVE          // user currently checked in
+  EXPIRED         // 90-min window passed
+  ENDED           // user manually exited (panic / leave)
+}
+
+enum ChatStatus {
+  PENDING         // request sent, awaiting accept
+  ACTIVE          // both parties chatting
+  REVEALED        // mutual table reveal happened
+  ENDED           // closed (panic, block, or one party left)
+}
+
+enum RevealStatus {
+  NONE
+  REQUESTED       // one side asked
+  CONFIRMED       // other side accepted -> table numbers shared
+  DECLINED
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportReason {
+  HARASSMENT
+  SPAM
+  INAPPROPRIATE_CONTENT
+  FAKE_PROFILE
+  UNDERAGE
+  OTHER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  DELETED
+}
+
+// ============================================================
+// USER
+// ============================================================
+
+model User {
+  id              String     @id @default(cuid())
+  phone           String     @unique
+  handle          String     @unique             // anonymous display name
+  age             Int
+  gender          Gender
+  photoUrl        String?
+  bio             String?    @db.VarChar(140)
+
+  status          UserStatus @default(ACTIVE)
+  ageGateAccepted Boolean    @default(false)
+  termsAcceptedAt DateTime?
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  lastSeenAt      DateTime?
+  deletedAt       DateTime?
+
+  // relations
+  presences       Presence[]
+  sentChats       Chat[]      @relation("ChatInitiator")
+  receivedChats   Chat[]      @relation("ChatRecipient")
+  messages        Message[]
+  blocksMade      Block[]     @relation("Blocker")
+  blocksReceived  Block[]     @relation("Blocked")
+  reportsMade     Report[]    @relation("Reporter")
+  reportsReceived Report[]    @relation("Reported")
+  otpCodes        OtpCode[]
+
+  @@index([handle])
+  @@index([status])
+}
+
+// One-time passwords for phone signup/login
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String                              // never store plaintext OTP
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    String?
+
+  @@index([phone, consumed])
+}
+
+// ============================================================
+// VENUE
+// ============================================================
+
+model Venue {
+  id              String     @id @default(cuid())
+  name            String
+  address         String
+  city            String
+  latitude        Float
+  longitude       Float
+  geoRadiusMeters Int        @default(80)        // server-side geofence
+  totalTables     Int        @default(20)
+
+  qrSecret        String     @unique             // signing secret for QR tokens
+  qrVersion       Int        @default(1)         // bump to invalidate cloned QRs
+
+  isActive        Boolean    @default(true)
+  coverImageUrl   String?
+  description     String?
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  presences       Presence[]
+  chats           Chat[]
+  managedBy       Admin[]    @relation("VenueAdmins")
+
+  @@index([city, isActive])
+  @@index([latitude, longitude])
+}
+
+// ============================================================
+// PRESENCE  (the heart of the platform)
+// ============================================================
+
+model Presence {
+  id           String         @id @default(cuid())
+  userId       String
+  venueId      String
+  tableNumber  Int                                // private until mutual reveal
+
+  status       PresenceStatus @default(ACTIVE)
+  checkInLat   Float                              // for geo-validation audit
+  checkInLng   Float
+  qrTokenJti   String         @unique             // single-use QR token id
+
+  startedAt    DateTime       @default(now())
+  expiresAt    DateTime                           // startedAt + 90 minutes
+  endedAt      DateTime?
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue        Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, status, expiresAt])           // hot path: "who's active here"
+  @@index([userId, status])
+}
+
+// ============================================================
+// CHAT + MESSAGES
+// ============================================================
+
+model Chat {
+  id              String        @id @default(cuid())
+  initiatorId     String
+  recipientId     String
+  venueId         String                          // chats are venue-scoped
+
+  status          ChatStatus    @default(PENDING)
+  revealStatus    RevealStatus  @default(NONE)
+
+  // table numbers are stored but NOT exposed to the other party until REVEALED
+  initiatorTable  Int
+  recipientTable  Int
+
+  revealRequestedById String?
+  revealedAt          DateTime?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  endedAt         DateTime?
+  endedReason     String?
+
+  initiator       User          @relation("ChatInitiator", fields: [initiatorId], references: [id])
+  recipient       User          @relation("ChatRecipient", fields: [recipientId], references: [id])
+  venue           Venue         @relation(fields: [venueId], references: [id])
+  messages        Message[]
+  reports         Report[]
+
+  @@unique([initiatorId, recipientId, venueId])   // no duplicate chat threads at same venue
+  @@index([venueId, status])
+  @@index([initiatorId, status])
+  @@index([recipientId, status])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  chatId    String
+  senderId  String
+  content   String   @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender    User     @relation(fields: [senderId], references: [id])
+
+  @@index([chatId, createdAt])
+}
+
+// ============================================================
+// TRUST & SAFETY
+// ============================================================
+
+model Block {
+  id         String   @id @default(cuid())
+  blockerId  String
+  blockedId  String
+  createdAt  DateTime @default(now())
+
+  blocker    User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked    User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+model Report {
+  id           String       @id @default(cuid())
+  reporterId   String
+  reportedId   String
+  chatId       String?
+
+  reason       ReportReason
+  details      String?      @db.VarChar(500)
+  status       ReportStatus @default(OPEN)
+
+  reviewedById String?
+  reviewedAt   DateTime?
+  actionTaken  String?
+
+  createdAt    DateTime     @default(now())
+
+  reporter     User         @relation("Reporter", fields: [reporterId], references: [id])
+  reported     User         @relation("Reported", fields: [reportedId], references: [id])
+  chat         Chat?        @relation(fields: [chatId], references: [id])
+  reviewedBy   Admin?       @relation("ReportReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status, createdAt])
+  @@index([reportedId])
+}
+
+// ============================================================
+// ADMIN
+// ============================================================
+
+model Admin {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  role         AdminRole  @default(MODERATOR)
+
+  isActive     Boolean    @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  managedVenues Venue[]   @relation("VenueAdmins")
+  reportsReviewed Report[] @relation("ReportReviewer")
+  auditLogs    AuditLog[]
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  adminId    String
+  action     String                              // e.g. "USER_BAN", "VENUE_CREATE"
+  targetType String                              // "User" | "Venue" | "Chat" | "Report"
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  admin      Admin    @relation(fields: [adminId], references: [id])
+
+  @@index([adminId, createdAt])
+  @@index([targetType, targetId])
+}
