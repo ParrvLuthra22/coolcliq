@@ -99,9 +99,9 @@ export default function Showcase() {
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-2 gap-8 items-center">
             <div className="flex flex-wrap gap-3 md:justify-end">
-              <FooterLink icon={<Github className="w-4 h-4" />} label="GitHub" href="#" />
-              <FooterLink icon={<Figma className="w-4 h-4" />} label="Figma" href="#" />
-              <FooterLink icon={<ExternalLink className="w-4 h-4" />} label="Live demo" href="#" />
+              <FooterLink icon={<Github className="w-4 h-4" />} label="GitHub" href="https://github.com/ParrvLuthra22/coolcliq.git" />
+              <FooterLink icon={<Figma className="w-4 h-4" />} label="Figma" href="https://www.figma.com/board/cbNQxGwtnFkEIY7l6xFx5G/CoolCliq-%E2%80%94-User---Admin-Flow?node-id=0-1&t=09rA30h4dc7Lw9et-1" />
+              <FooterLink icon={<ExternalLink className="w-4 h-4" />} label="Live demo" href="https://elegant-croissant-911523.netlify.app/" />
             </div>
           </div>
           <div className="mt-12 pt-8 border-t border-smoke flex flex-wrap items-center justify-between gap-3 text-xs text-fog font-mono">
