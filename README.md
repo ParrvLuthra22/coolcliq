@@ -4,7 +4,7 @@
 
 A QR-based venue presence and anonymous chat platform — built end-to-end as a Newton School × CoolCliq assignment submission.
 
-🔗 **Live demo:** [_add Netlify URL_](https://elegant-croissant-911523.netlify.app/)
+🔗 **Live demo:** [_add Netlify URL_]((https://coolcliq.netlify.app/))
 🔗 **Figma flow:** [_add public Figma link_](https://www.figma.com/board/cbNQxGwtnFkEIY7l6xFx5G/CoolCliq-%E2%80%94-User---Admin-Flow?node-id=0-1&t=09rA30h4dc7Lw9et-1)
 🔗 **GitHub:** [ _this repo_](https://github.com/ParrvLuthra22/coolcliq.git)
 
